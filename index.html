@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Carga en Campo Magnético</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; text-align: center; margin: 15px; }
+        .contenedor { max-width: 850px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        canvas { background: #ffffff; border: 1px solid #ccc; display: block; margin: 10px auto; }
+        .controles { margin: 12px 0; display: flex; justify-content: center; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .control-grupo { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: bold; }
+        input[type=range] { width: 90px; }
+        button { padding: 8px 16px; font-size: 14px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #0056b3; }
+        .info { font-weight: bold; color: #333; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="contenedor">
+    <h2>Movimiento de una Carga en un Campo Magnético</h2>
+    
+    <div class="controles">
+        <div class="control-grupo">
+            <label for="carga">q:</label>
+            <input type="range" id="carga" min="-10" max="10" step="1" value="-4" oninput="actualizarValores()">
+            <span id="valCarga">-4 μC</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="masa">m:</label>
+            <input type="range" id="masa" min="0.5" max="10" step="0.5" value="2" oninput="actualizarValores()">
+            <span id="valMasa">2.0 mg</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="velocidad">v:</label>
+            <input type="range" id="velocidad" min="5" max="100" step="5" value="60" oninput="actualizarValores()">
+            <span id="valVelocidad">60 m/s</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="campo">B:</label>
+            <input type="range" id="campo" min="-5" max="5" step="0.5" value="4" oninput="actualizarValores()">
+            <span id="valCampo">4.0 T (⊗)</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="posX">Pos. X:</label>
+            <input type="range" id="posX" min="30" max="750" step="10" value="40" oninput="actualizarValores()">
+            <span id="valPosX">40 px</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="posY">Pos. Y:</label>
+            <input type="range" id="posY" min="50" max="430" step="10" value="240" oninput="actualizarValores()">
+            <span id="valPosY">240 px</span>
+        </div>
+
+        <div class="control-grupo">
+            <label for="vSim">Vel. Simulación:</label>
+            <input type="range" id="vSim" min="0.5" max="2" step="0.25" value="1" oninput="actualizarValores()">
+            <span id="valVSim">1.0x</span>
+        </div>
+    </div>
+
+    <div class="controles">
+        <button id="btnIniciar" onclick="alternarAnimacion()" style="background:#28a745;">▶ Iniciar / Pausar</button>
+        <button onclick="reiniciar()" style="background:#dc3545;">↻ Reiniciar</button>
+    </div>
+
+    <canvas id="lienzo" width="800" height="480"></canvas>
+    
+    <div class="info" id="datos">Estado: Listo | Presiona Iniciar</div>
+</div>
+
+<script>
+const canvas = document.getElementById("lienzo");
+const ctx = canvas.getContext("2d");
+
+// Región del campo magnético B
+const X_MIN_B = 120;
+const X_MAX_B = 760;
+const Y_MIN_B = 30;
+const Y_MAX_B = 450;
+
+// Parámetros
+let q = -4;
+let m = 2;
+let v = 60;
+let B = 4;
+let xInicial = 40;
+let yInicial = 240;
+let factorVSim = 1;
+
+let animando = false;
+let idAnimacion = null;
+
+let x = 40;
+let y = 240;
+let vx = 1;
+let vy = 0;
+
+let anguloActual = 0;
+let tAcumulado = 0;
+let enCampoAnterior = false;
+let cx = 0, cy = 0; // Centro de giro cuando entra al campo
+
+let trayectoria = [];
+const ESCALA_PX = 12;
+
+function actualizarValores() {
+    q = parseFloat(document.getElementById("carga").value);
+    m = parseFloat(document.getElementById("masa").value);
+    v = parseFloat(document.getElementById("velocidad").value);
+    B = parseFloat(document.getElementById("campo").value);
+    xInicial = parseFloat(document.getElementById("posX").value);
+    yInicial = parseFloat(document.getElementById("posY").value);
+    factorVSim = parseFloat(document.getElementById("vSim").value);
+
+    document.getElementById("valCarga").innerText = (q > 0 ? "+" + q : q) + " μC";
+    document.getElementById("valMasa").innerText = m.toFixed(1) + " mg";
+    document.getElementById("valVelocidad").innerText = v + " m/s";
+    document.getElementById("valPosX").innerText = xInicial + " px";
+    document.getElementById("valPosY").innerText = yInicial + " px";
+    document.getElementById("valVSim").innerText = factorVSim.toFixed(1) + "x";
+    
+    let simCampo = B > 0 ? " (⊗ Entrando)" : (B < 0 ? " (⊙ Saliendo)" : " (0 T - Sin campo)");
+    document.getElementById("valCampo").innerText = Math.abs(B).toFixed(1) + " T" + simCampo;
+
+    if (!animando) {
+        reiniciar();
+    }
+}
+
+function alternarAnimacion() {
+    animando = !animando;
+    if (animando) {
+        document.getElementById("datos").innerText = "Estado: En movimiento...";
+        if (idAnimacion) cancelAnimationFrame(idAnimacion);
+        animar();
+    } else {
+        if (idAnimacion) {
+            cancelAnimationFrame(idAnimacion);
+            idAnimacion = null;
+        }
+        document.getElementById("datos").innerText = "Estado: ⏸ PAUSADO";
+        dibujar();
+    }
+}
+
+function reiniciar() {
+    animando = false;
+    if (idAnimacion) {
+        cancelAnimationFrame(idAnimacion);
+        idAnimacion = null;
+    }
+    x = xInicial;
+    y = yInicial;
+    vx = 1;
+    vy = 0;
+    tAcumulado = 0;
+    enCampoAnterior = false;
+    trayectoria = [];
+    document.getElementById("datos").innerText = "Estado: Reiniciado";
+    dibujar();
+}
+
+function estaEnRegionCampo(px, py) {
+    return (px >= X_MIN_B && px <= X_MAX_B && py >= Y_MIN_B && py <= Y_MAX_B && B !== 0 && q !== 0);
+}
+
+function actualizarFisica() {
+    let estaEnCampo = estaEnRegionCampo(x, y);
+    let R_teorico = (q !== 0 && B !== 0) ? Math.abs((m * v) / (q * B)) : Infinity;
+    let R_px = R_teorico * ESCALA_PX;
+    let pasoPaso = 2.0 * factorVSim;
+
+    if (estaEnCampo) {
+        let signoGiro = (q * B > 0) ? -1 : 1;
+
+        // Si acaba de ingresar al campo, calcular el centro de la órbita tangente
+        if (!enCampoAnterior) {
+            enCampoAnterior = true;
+            // Perp a la velocidad instantánea
+            cx = x - signoGiro * vy * R_px;
+            cy = y + signoGiro * vx * R_px;
+            anguloActual = Math.atan2(y - cy, x - cx);
+        }
+
+        // Avance angular suave
+        let dTheta = (pasoPaso / R_px) * signoGiro;
+        anguloActual += dTheta;
+
+        x = cx + R_px * Math.cos(anguloActual);
+        y = cy + R_px * Math.sin(anguloActual);
+
+        // Actualizar vector velocidad tangente
+        vx = -Math.sin(anguloActual) * signoGiro;
+        vy = Math.cos(anguloActual) * signoGiro;
+
+    } else {
+        // Fuera del campo -> MRU en dirección actual
+        enCampoAnterior = false;
+        x += vx * pasoPaso;
+        y += vy * pasoPaso;
+    }
+
+    trayectoria.push({x: x, y: y});
+    if (trayectoria.length > 3000) trayectoria.shift();
+}
+
+function dibujarFondoCampo() {
+    // Delimitación de la región de B
+    ctx.strokeStyle = "#007bff";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 6]);
+    ctx.strokeRect(X_MIN_B, Y_MIN_B, X_MAX_B - X_MIN_B, Y_MAX_B - Y_MIN_B);
+    ctx.setLineDash([]);
+
+    if (B === 0) return;
+
+    ctx.strokeStyle = "#88929a";
+    ctx.fillStyle = "#88929a";
+    ctx.lineWidth = 1;
+
+    for (let gx = X_MIN_B + 25; gx < X_MAX_B; gx += 45) {
+        for (let gy = Y_MIN_B + 20; gy < Y_MAX_B; gy += 45) {
+            if (B > 0) {
+                ctx.beginPath(); ctx.arc(gx, gy, 7, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(gx - 4, gy - 4); ctx.lineTo(gx + 4, gy + 4);
+                ctx.moveTo(gx + 4, gy - 4); ctx.lineTo(gx - 4, gy + 4);
+                ctx.stroke();
+            } else if (B < 0) {
+                ctx.beginPath(); ctx.arc(gx, gy, 7, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(gx, gy, 2.5, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+    }
+}
+
+function dibujarVectorAnonimo(x0, y0, dirX, dirY, longitudPx, color) {
+    let magn = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (magn === 0) return;
+    
+    let x1 = x0 + (dirX / magn) * longitudPx;
+    let y1 = y0 + (dirY / magn) * longitudPx;
+
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+
+    let angulo = Math.atan2(dirY, dirX);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - 11 * Math.cos(angulo - Math.PI / 6), y1 - 11 * Math.sin(angulo - Math.PI / 6));
+    ctx.lineTo(x1 - 11 * Math.cos(angulo + Math.PI / 6), y1 - 11 * Math.sin(angulo + Math.PI / 6));
+    ctx.fill();
+}
+
+function dibujar() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    dibujarFondoCampo();
+
+    // Trayectoria azul
+    if (trayectoria.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = "#007bff";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]);
+        for (let i = 0; i < trayectoria.length; i++) {
+            if (i === 0) ctx.moveTo(trayectoria[i].x, trayectoria[i].y);
+            else ctx.lineTo(trayectoria[i].x, trayectoria[i].y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Partícula
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fillStyle = q > 0 ? "#dc3545" : (q < 0 ? "#007bff" : "#6c757d");
+    ctx.fill();
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 13px Arial";
+    let signoText = q > 0 ? "+" : (q < 0 ? "-" : "0");
+    ctx.fillText(signoText, x - ctx.measureText(signoText).width / 2, y + 4);
+
+    // Vector Velocidad (Verde, 60px)
+    dibujarVectorAnonimo(x, y, vx, vy, 60, "#28a745"); 
+
+    let estaEnCampo = estaEnRegionCampo(x, y);
+
+    // Vector Fuerza (Rojo, 45px) apuntando al centro solo si está en B
+    if (estaEnCampo) {
+        let F_dirX = cx - x;
+        let F_dirY = cy - y;
+        dibujarVectorAnonimo(x, y, F_dirX, F_dirY, 45, "#d9534f"); 
+    }
+
+    // Cota del Radio R en Pausa
+    if (!animando) {
+        if (estaEnCampo) {
+            let R_teorico = Math.abs((m * v) / (q * B));
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = "#000";
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(cx, cy);
+            ctx.strokeStyle = "#6f42c1";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = "#6f42c1";
+            ctx.font = "bold 14px Arial";
+            ctx.fillText("R", (x + cx) / 2 + 6, (y + cy) / 2);
+
+            document.getElementById("datos").innerText = 
+                `Estado: ⏸ PAUSADO | Radio de giro (R) = ${R_teorico.toFixed(1)} m`;
+        } else {
+            document.getElementById("datos").innerText = 
+                `Estado: ⏸ PAUSADO | Fuera del campo magnético (F = 0) | Trayectoria rectilínea`;
+        }
+    }
+}
+
+function animar() {
+    if (!animando) return;
+
+    actualizarFisica();
+    dibujar();
+
+    if (x < -50 || x > canvas.width + 50 || y < -50 || y > canvas.height + 50) {
+        animando = false;
+        document.getElementById("datos").innerText = "Estado: Partícula fuera de la simulación";
+        idAnimacion = null;
+        return;
+    }
+
+    idAnimacion = requestAnimationFrame(animar);
+}
+
+actualizarValores();
+</script>
+
+</body>
+</html>
